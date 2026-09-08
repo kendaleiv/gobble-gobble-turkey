@@ -1,0 +1,683 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#7bcdf3">
+<title>Gobble Gobble Turkey</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 100%; height: 100%; }
+  body {
+    align-items: center;
+    background: #17324d;
+    color: #fff7df;
+    display: flex;
+    flex-direction: column;
+    font-family: "Trebuchet MS", Arial, sans-serif;
+    justify-content: center;
+    overflow: hidden;
+    padding: env(safe-area-inset-top) env(safe-area-inset-right)
+             env(safe-area-inset-bottom) env(safe-area-inset-left);
+  }
+  #gameCanvas {
+    background: #7bcdf3;
+    border: 4px solid #fff7df;
+    border-radius: 14px;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+    display: block;
+    max-height: calc(100vh - 52px);
+    max-width: 100vw;
+    touch-action: none;
+    user-select: none;
+  }
+  #instructions {
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    min-height: 36px;
+    padding: 10px 12px 0;
+    text-align: center;
+  }
+  #instructions span { color: #ffd34d; }
+  @media (max-height: 480px) {
+    #gameCanvas { max-height: calc(100vh - 30px); }
+    #instructions { font-size: 12px; min-height: 26px; padding-top: 6px; }
+  }
+</style>
+</head>
+<body>
+<canvas id="gameCanvas" width="960" height="540"
+  aria-label="Gobble Gobble Turkey racing game. Tap, click, or press Space repeatedly to move the pig."
+  role="img"></canvas>
+<div id="instructions"><span>TAP</span>, <span>CLICK</span>, or press <span>SPACE</span> repeatedly to run!</div>
+<script>
+(function () {
+  "use strict";
+
+  var WIDTH = 960;
+  var HEIGHT = 540;
+  var GROUND_Y = 432;
+  var LEVEL_END = 3400;
+  var START_X = 130;
+  var PLAYER_MAX_SPEED = 6.5;
+  var TAP_BOOST = 2.4;
+  var FRICTION = 0.965;
+  var TURKEY_SPEED = 1.62;
+  var FRAME_DURATION = 1000 / 60;
+  var MAX_FRAME_GAP = 200;
+
+  var canvas = document.getElementById("gameCanvas");
+  var ctx = canvas.getContext("2d");
+  var instructions = document.getElementById("instructions");
+
+  var state = "title";
+  var frame = 0;
+  var countdown = 180;
+  var cameraX = 0;
+  var finishDelay = 0;
+  var winner = "";
+  var taps = 0;
+  var bestTaps = null;
+  var particles = [];
+  var clouds = [
+    { x: 130, y: 90, scale: 1.1 },
+    { x: 690, y: 130, scale: 0.8 },
+    { x: 1220, y: 72, scale: 1.25 },
+    { x: 1850, y: 120, scale: 0.9 },
+    { x: 2480, y: 82, scale: 1.1 },
+    { x: 3060, y: 132, scale: 0.75 }
+  ];
+
+  var player = { x: START_X, speed: 0 };
+  var turkey = { x: START_X + 20 };
+  var fullscreenButton = { x: WIDTH - 58, y: 16, w: 42, h: 42 };
+
+  function resizeCanvas() {
+    var availableHeight = Math.max(1, window.innerHeight - instructions.offsetHeight);
+    var scale = Math.min(window.innerWidth / WIDTH, availableHeight / HEIGHT);
+    canvas.style.width = Math.floor(WIDTH * scale) + "px";
+    canvas.style.height = Math.floor(HEIGHT * scale) + "px";
+  }
+
+  function pointInRect(x, y, rect) {
+    return x >= rect.x && x <= rect.x + rect.w &&
+      y >= rect.y && y <= rect.y + rect.h;
+  }
+
+  function canvasPoint(event) {
+    var bounds = canvas.getBoundingClientRect();
+    return {
+      x: (event.clientX - bounds.left) * WIDTH / bounds.width,
+      y: (event.clientY - bounds.top) * HEIGHT / bounds.height
+    };
+  }
+
+  function isFullscreen() {
+    return !!(document.fullscreenElement || document.webkitFullscreenElement);
+  }
+
+  function toggleFullscreen() {
+    if (isFullscreen()) {
+      if (document.exitFullscreen) document.exitFullscreen();
+      else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
+    } else {
+      var element = document.documentElement;
+      if (element.requestFullscreen) element.requestFullscreen();
+      else if (element.webkitRequestFullscreen) element.webkitRequestFullscreen();
+    }
+  }
+
+  function resetRace() {
+    player.x = START_X;
+    player.speed = 0;
+    turkey.x = START_X + 20;
+    cameraX = 0;
+    countdown = 180;
+    finishDelay = 0;
+    winner = "";
+    taps = 0;
+    particles.length = 0;
+    state = "countdown";
+    instructions.innerHTML = "<span>GET READY!</span> Tap when the race starts.";
+  }
+
+  function handleAction() {
+    if (state === "title" || state === "finished") {
+      resetRace();
+      return;
+    }
+    if (state === "racing") {
+      player.speed = Math.min(PLAYER_MAX_SPEED, player.speed + TAP_BOOST);
+      taps++;
+      spawnDust(player.x, GROUND_Y - 8, "#e9d7a5", 3);
+    }
+  }
+
+  canvas.addEventListener("pointerdown", function (event) {
+    event.preventDefault();
+    var point = canvasPoint(event);
+    if (pointInRect(point.x, point.y, fullscreenButton)) {
+      toggleFullscreen();
+      return;
+    }
+    handleAction();
+  });
+
+  document.addEventListener("keydown", function (event) {
+    if (event.code === "Space" || event.code === "Enter") {
+      event.preventDefault();
+      if (!event.repeat) handleAction();
+    }
+    if (event.code === "KeyF") toggleFullscreen();
+  });
+
+  window.addEventListener("resize", resizeCanvas);
+  document.addEventListener("fullscreenchange", resizeCanvas);
+  document.addEventListener("webkitfullscreenchange", resizeCanvas);
+  resizeCanvas();
+
+  function spawnDust(x, y, color, count) {
+    for (var i = 0; i < count; i++) {
+      particles.push({
+        x: x + Math.random() * 22,
+        y: y - Math.random() * 8,
+        vx: -1.2 - Math.random() * 1.8,
+        vy: -0.5 - Math.random() * 1.6,
+        life: 18 + Math.random() * 14,
+        color: color,
+        size: 3 + Math.random() * 5
+      });
+    }
+  }
+
+  function spawnConfetti() {
+    var colors = ["#ff5d73", "#ffd34d", "#67d46c", "#fff7df", "#8b5cf6"];
+    for (var i = 0; i < 90; i++) {
+      particles.push({
+        x: Math.random() * WIDTH,
+        y: -Math.random() * 140,
+        vx: -1.5 + Math.random() * 3,
+        vy: 1 + Math.random() * 3,
+        life: 150 + Math.random() * 100,
+        color: colors[i % colors.length],
+        size: 4 + Math.random() * 6,
+        confetti: true
+      });
+    }
+  }
+
+  function updateParticles() {
+    for (var i = particles.length - 1; i >= 0; i--) {
+      var particle = particles[i];
+      particle.x += particle.vx;
+      particle.y += particle.vy;
+      particle.life--;
+      if (particle.confetti) {
+        particle.vy += 0.035;
+        particle.vx *= 0.995;
+      } else {
+        particle.vy += 0.07;
+      }
+      if (particle.life <= 0 || particle.y > HEIGHT + 20) particles.splice(i, 1);
+    }
+  }
+
+  function finishRace(result) {
+    if (state !== "racing") return;
+    winner = result;
+    state = "finish_delay";
+    finishDelay = 75;
+    player.speed = 0;
+    spawnConfetti();
+    if (result === "pig" && (bestTaps === null || taps < bestTaps)) bestTaps = taps;
+  }
+
+  function update() {
+    frame++;
+    updateParticles();
+
+    if (state === "countdown") {
+      countdown--;
+      if (countdown <= 0) {
+        state = "racing";
+        instructions.innerHTML = "<span>KEEP TAPPING</span> to keep the pig moving!";
+      }
+      return;
+    }
+
+    if (state === "racing") {
+      player.x += player.speed;
+      player.speed *= FRICTION;
+      if (player.speed < 0.02) player.speed = 0;
+
+      var turkeyPace = TURKEY_SPEED + Math.sin(frame * 0.035) * 0.1;
+      turkey.x += turkeyPace;
+      if (frame % 16 === 0) spawnDust(turkey.x, GROUND_Y + 35, "#e9d7a5", 1);
+
+      var focusX = (player.x + turkey.x) / 2;
+      cameraX += (Math.max(0, Math.min(LEVEL_END - WIDTH + 300, focusX - 350)) - cameraX) * 0.08;
+
+      if (player.x >= LEVEL_END) finishRace("pig");
+      else if (turkey.x >= LEVEL_END) finishRace("turkey");
+    } else if (state === "finish_delay") {
+      finishDelay--;
+      if (finishDelay <= 0) {
+        state = "finished";
+        instructions.innerHTML = "<span>TAP</span>, <span>CLICK</span>, or press <span>SPACE</span> to race again.";
+      }
+    }
+  }
+
+  function roundedRect(x, y, w, h, radius, color) {
+    ctx.beginPath();
+    ctx.roundRect(x, y, w, h, radius);
+    ctx.fillStyle = color;
+    ctx.fill();
+  }
+
+  function drawCloud(x, y, scale) {
+    ctx.fillStyle = "rgba(255,255,255,0.88)";
+    ctx.beginPath();
+    ctx.arc(x, y, 25 * scale, 0, Math.PI * 2);
+    ctx.arc(x + 31 * scale, y - 14 * scale, 31 * scale, 0, Math.PI * 2);
+    ctx.arc(x + 68 * scale, y, 25 * scale, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillRect(x, y, 68 * scale, 25 * scale);
+  }
+
+  function drawBackground() {
+    var sky = ctx.createLinearGradient(0, 0, 0, GROUND_Y);
+    sky.addColorStop(0, "#69c4f0");
+    sky.addColorStop(1, "#c7eff9");
+    ctx.fillStyle = sky;
+    ctx.fillRect(0, 0, WIDTH, GROUND_Y);
+
+    ctx.fillStyle = "#f9d85e";
+    ctx.beginPath();
+    ctx.arc(90, 86, 42, 0, Math.PI * 2);
+    ctx.fill();
+
+    for (var i = 0; i < clouds.length; i++) {
+      var cloud = clouds[i];
+      var cloudX = cloud.x - cameraX * 0.18;
+      while (cloudX < -150) cloudX += LEVEL_END * 0.55;
+      while (cloudX > WIDTH + 150) cloudX -= LEVEL_END * 0.55;
+      drawCloud(cloudX, cloud.y, cloud.scale);
+    }
+
+    ctx.fillStyle = "#78bd62";
+    ctx.beginPath();
+    ctx.moveTo(0, GROUND_Y);
+    for (var x = -80; x <= WIDTH + 100; x += 120) {
+      var hillX = x - (cameraX * 0.3) % 120;
+      ctx.quadraticCurveTo(hillX + 60, 290, hillX + 120, GROUND_Y);
+    }
+    ctx.lineTo(WIDTH, GROUND_Y);
+    ctx.fill();
+
+    ctx.fillStyle = "#4f9f45";
+    ctx.fillRect(0, GROUND_Y - 8, WIDTH, 26);
+    ctx.fillStyle = "#307d37";
+    for (var blade = -20; blade < WIDTH + 20; blade += 16) {
+      var bx = blade - cameraX % 16;
+      ctx.beginPath();
+      ctx.moveTo(bx, GROUND_Y);
+      ctx.lineTo(bx + 4, GROUND_Y - 16 - (blade % 3) * 2);
+      ctx.lineTo(bx + 8, GROUND_Y);
+      ctx.fill();
+    }
+    ctx.fillStyle = "#8b6339";
+    ctx.fillRect(0, GROUND_Y + 18, WIDTH, HEIGHT - GROUND_Y - 18);
+    ctx.fillStyle = "#a97d4e";
+    for (var dot = 0; dot < 42; dot++) {
+      var dx = (dot * 137 - cameraX * 0.5) % (WIDTH + 30);
+      if (dx < 0) dx += WIDTH + 30;
+      ctx.fillRect(dx, GROUND_Y + 35 + (dot * 29) % 78, 9, 5);
+    }
+  }
+
+  function drawFence() {
+    ctx.strokeStyle = "#f3e4bc";
+    ctx.lineWidth = 7;
+    ctx.lineCap = "round";
+    for (var x = -40 - cameraX % 90; x < WIDTH + 90; x += 90) {
+      ctx.beginPath();
+      ctx.moveTo(x, GROUND_Y - 68);
+      ctx.lineTo(x, GROUND_Y - 8);
+      ctx.stroke();
+    }
+    ctx.beginPath();
+    ctx.moveTo(0, GROUND_Y - 48);
+    ctx.lineTo(WIDTH, GROUND_Y - 48);
+    ctx.stroke();
+  }
+
+  function drawPig(worldX) {
+    var x = worldX - cameraX;
+    var y = GROUND_Y - 45;
+    var stride = state === "racing" ? Math.sin(frame * (0.15 + player.speed * 0.12)) * 5 : 0;
+
+    ctx.strokeStyle = "#d66782";
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.arc(x - 20, y + 12, 9, 0.2, Math.PI * 1.75);
+    ctx.stroke();
+
+    ctx.fillStyle = "#f58faa";
+    ctx.beginPath();
+    ctx.ellipse(x, y, 29, 22, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = "#f8a1b7";
+    ctx.beginPath();
+    ctx.moveTo(x + 9, y - 17);
+    ctx.lineTo(x + 18, y - 36);
+    ctx.lineTo(x + 27, y - 13);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(x - 1, y - 19);
+    ctx.lineTo(x + 2, y - 36);
+    ctx.lineTo(x + 13, y - 17);
+    ctx.fill();
+
+    ctx.fillStyle = "#f58faa";
+    ctx.beginPath();
+    ctx.arc(x + 22, y - 3, 20, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#f9b4c5";
+    ctx.beginPath();
+    ctx.ellipse(x + 35, y + 3, 12, 9, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#b84f6a";
+    ctx.beginPath();
+    ctx.arc(x + 31, y + 2, 2, 0, Math.PI * 2);
+    ctx.arc(x + 39, y + 2, 2, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#253143";
+    ctx.beginPath();
+    ctx.arc(x + 27, y - 9, 3.5, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.strokeStyle = "#b84f6a";
+    ctx.lineWidth = 7;
+    ctx.beginPath();
+    ctx.moveTo(x - 11, y + 17);
+    ctx.lineTo(x - 12 + stride, y + 29);
+    ctx.moveTo(x + 13, y + 17);
+    ctx.lineTo(x + 12 - stride, y + 29);
+    ctx.stroke();
+  }
+
+  function drawTurkeyShape(x, y, scale, big) {
+    var bob = Math.sin(frame * 0.14) * 2;
+    y += bob;
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.scale(scale, scale);
+
+    var featherColors = big
+      ? ["#b6292f", "#e56b2f", "#f3a52b", "#b6292f", "#e56b2f"]
+      : ["#983541", "#d95832", "#ed9332", "#983541", "#d95832"];
+    for (var i = 0; i < 5; i++) {
+      ctx.fillStyle = featherColors[i];
+      ctx.beginPath();
+      ctx.ellipse(-21 + i * 10, -8 - Math.abs(2 - i) * 3, 11, 24, (i - 2) * 0.28, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    ctx.fillStyle = big ? "#694123" : "#75472a";
+    ctx.beginPath();
+    ctx.ellipse(0, 4, 25, 21, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(22, -14, 12, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = "#e4453c";
+    ctx.beginPath();
+    ctx.ellipse(25, -2, 5, 12, -0.25, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#f3b33f";
+    ctx.beginPath();
+    ctx.moveTo(32, -14);
+    ctx.lineTo(45, -10);
+    ctx.lineTo(32, -6);
+    ctx.fill();
+    ctx.fillStyle = "#fff";
+    ctx.beginPath();
+    ctx.arc(26, -18, 4, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#202a35";
+    ctx.beginPath();
+    ctx.arc(28, -18, 2, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.strokeStyle = "#e6a732";
+    ctx.lineWidth = 4;
+    var stride = Math.sin(frame * 0.22) * 4;
+    ctx.beginPath();
+    ctx.moveTo(-7, 20);
+    ctx.lineTo(-10 + stride, 31);
+    ctx.moveTo(9, 20);
+    ctx.lineTo(12 - stride, 31);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  function drawTurkeyTeam(worldX) {
+    var x = worldX - cameraX;
+    drawTurkeyShape(x, GROUND_Y + 5, 0.9, false);
+    drawTurkeyShape(x - 4, GROUND_Y - 57, 1.22, true);
+    ctx.strokeStyle = "#59361e";
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(x - 23, GROUND_Y - 27);
+    ctx.lineTo(x + 23, GROUND_Y - 27);
+    ctx.stroke();
+  }
+
+  function drawKey() {
+    var x = LEVEL_END - cameraX + 30;
+    ctx.fillStyle = "#6e4b28";
+    ctx.fillRect(x - 8, GROUND_Y - 88, 16, 88);
+    ctx.fillStyle = "#fff7df";
+    ctx.fillRect(x - 55, GROUND_Y - 105, 110, 27);
+    ctx.fillStyle = "#4c3522";
+    ctx.font = "bold 15px 'Trebuchet MS', sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText("THE KEY", x, GROUND_Y - 86);
+
+    ctx.strokeStyle = "#f7c928";
+    ctx.lineWidth = 11;
+    ctx.beginPath();
+    ctx.arc(x, GROUND_Y - 145, 24, 0, Math.PI * 2);
+    ctx.moveTo(x, GROUND_Y - 121);
+    ctx.lineTo(x, GROUND_Y - 82);
+    ctx.lineTo(x + 20, GROUND_Y - 82);
+    ctx.moveTo(x, GROUND_Y - 98);
+    ctx.lineTo(x + 16, GROUND_Y - 98);
+    ctx.stroke();
+    ctx.strokeStyle = "#fff2a1";
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(x - 5, GROUND_Y - 150, 13, Math.PI, Math.PI * 1.7);
+    ctx.stroke();
+  }
+
+  function drawParticles() {
+    for (var i = 0; i < particles.length; i++) {
+      var particle = particles[i];
+      ctx.globalAlpha = Math.min(1, particle.life / 18);
+      ctx.fillStyle = particle.color;
+      ctx.fillRect(
+        particle.confetti ? particle.x : particle.x - cameraX,
+        particle.y,
+        particle.size,
+        particle.size
+      );
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  function drawProgress() {
+    var barX = 190;
+    var barY = 22;
+    var barWidth = 580;
+    roundedRect(barX, barY, barWidth, 24, 12, "rgba(23,50,77,0.72)");
+    var pigProgress = Math.min(1, (player.x - START_X) / (LEVEL_END - START_X));
+    var turkeyProgress = Math.min(1, (turkey.x - START_X) / (LEVEL_END - START_X));
+
+    ctx.fillStyle = "#f58faa";
+    ctx.beginPath();
+    ctx.arc(barX + 10 + pigProgress * (barWidth - 20), barY + 8, 6, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#e56b2f";
+    ctx.beginPath();
+    ctx.arc(barX + 10 + turkeyProgress * (barWidth - 20), barY + 17, 6, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = "#fff7df";
+    ctx.font = "bold 14px 'Trebuchet MS', sans-serif";
+    ctx.textAlign = "right";
+    ctx.fillText("🔑", barX + barWidth - 7, barY + 18);
+    ctx.textAlign = "left";
+  }
+
+  function drawFullscreenButton() {
+    roundedRect(fullscreenButton.x, fullscreenButton.y, fullscreenButton.w,
+      fullscreenButton.h, 8, "rgba(23,50,77,0.76)");
+    ctx.strokeStyle = "#fff7df";
+    ctx.lineWidth = 3;
+    var x = fullscreenButton.x + 11;
+    var y = fullscreenButton.y + 11;
+    var s = 20;
+    ctx.beginPath();
+    ctx.moveTo(x + 7, y); ctx.lineTo(x, y); ctx.lineTo(x, y + 7);
+    ctx.moveTo(x + s - 7, y); ctx.lineTo(x + s, y); ctx.lineTo(x + s, y + 7);
+    ctx.moveTo(x, y + s - 7); ctx.lineTo(x, y + s); ctx.lineTo(x + 7, y + s);
+    ctx.moveTo(x + s, y + s - 7); ctx.lineTo(x + s, y + s); ctx.lineTo(x + s - 7, y + s);
+    ctx.stroke();
+  }
+
+  function drawTitle() {
+    ctx.fillStyle = "rgba(23,50,77,0.76)";
+    ctx.fillRect(0, 0, WIDTH, HEIGHT);
+    roundedRect(110, 67, 740, 396, 28, "#fff7df");
+    ctx.strokeStyle = "#e56b2f";
+    ctx.lineWidth = 8;
+    ctx.strokeRect(118, 75, 724, 380);
+
+    ctx.fillStyle = "#8e2838";
+    ctx.font = "900 56px 'Trebuchet MS', sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText("GOBBLE GOBBLE", WIDTH / 2, 155);
+    ctx.fillStyle = "#e56b2f";
+    ctx.font = "900 68px 'Trebuchet MS', sans-serif";
+    ctx.fillText("TURKEY", WIDTH / 2, 220);
+
+    drawPig(WIDTH / 2 - 105 + cameraX);
+    drawTurkeyShape(WIDTH / 2 + 72, 326, 0.7, false);
+    drawTurkeyShape(WIDTH / 2 + 70, 278, 0.92, true);
+
+    roundedRect(260, 363, 440, 65, 16, "#4f9f45");
+    ctx.fillStyle = "#fff";
+    ctx.font = "bold 25px 'Trebuchet MS', sans-serif";
+    ctx.fillText("TAP OR PRESS SPACE TO RACE", WIDTH / 2, 404);
+    ctx.fillStyle = "#60452e";
+    ctx.font = "bold 16px 'Trebuchet MS', sans-serif";
+    ctx.fillText("Help the pig beat the turkey stack to the golden key!", WIDTH / 2, 445);
+    ctx.textAlign = "left";
+  }
+
+  function drawCountdown() {
+    var label = countdown > 120 ? "3" : countdown > 60 ? "2" : "1";
+    ctx.fillStyle = "rgba(23,50,77,0.28)";
+    ctx.fillRect(0, 0, WIDTH, HEIGHT);
+    ctx.fillStyle = "#fff7df";
+    ctx.strokeStyle = "#8e2838";
+    ctx.lineWidth = 12;
+    ctx.font = "900 150px 'Trebuchet MS', sans-serif";
+    ctx.textAlign = "center";
+    ctx.strokeText(label, WIDTH / 2, 300);
+    ctx.fillText(label, WIDTH / 2, 300);
+    ctx.textAlign = "left";
+  }
+
+  function drawFinishOverlay() {
+    ctx.fillStyle = "rgba(23,50,77,0.68)";
+    ctx.fillRect(0, 0, WIDTH, HEIGHT);
+    roundedRect(190, 105, 580, 330, 25, "#fff7df");
+    ctx.textAlign = "center";
+    if (winner === "pig") {
+      ctx.fillStyle = "#4f9f45";
+      ctx.font = "900 54px 'Trebuchet MS', sans-serif";
+      ctx.fillText("OINK-TASTIC!", WIDTH / 2, 185);
+      ctx.fillStyle = "#60452e";
+      ctx.font = "bold 25px 'Trebuchet MS', sans-serif";
+      ctx.fillText("The pig reached the key first!", WIDTH / 2, 235);
+    } else {
+      ctx.fillStyle = "#e56b2f";
+      ctx.font = "900 50px 'Trebuchet MS', sans-serif";
+      ctx.fillText("GOBBLE GOBBLE!", WIDTH / 2, 185);
+      ctx.fillStyle = "#60452e";
+      ctx.font = "bold 22px 'Trebuchet MS', sans-serif";
+      ctx.fillText("So close! Tap a little faster next time.", WIDTH / 2, 235);
+    }
+    ctx.fillStyle = "#8e2838";
+    ctx.font = "bold 21px 'Trebuchet MS', sans-serif";
+    ctx.fillText("Taps: " + taps + (bestTaps === null ? "" : "   •   Best: " + bestTaps), WIDTH / 2, 288);
+    roundedRect(280, 326, 400, 66, 16, "#4f9f45");
+    ctx.fillStyle = "#fff";
+    ctx.font = "bold 24px 'Trebuchet MS', sans-serif";
+    ctx.fillText("TAP TO RACE AGAIN", WIDTH / 2, 367);
+    ctx.textAlign = "left";
+  }
+
+  function draw() {
+    drawBackground();
+    drawFence();
+    drawKey();
+    drawTurkeyTeam(turkey.x);
+    drawPig(player.x);
+    drawParticles();
+    if (state !== "title") drawProgress();
+    drawFullscreenButton();
+
+    if (state === "title") drawTitle();
+    else if (state === "countdown") drawCountdown();
+    else if (state === "finished") drawFinishOverlay();
+  }
+
+  var lastTime = -1;
+  var accumulatedTime = 0;
+  function loop(timestamp) {
+    if (lastTime < 0) lastTime = timestamp;
+    var elapsed = timestamp - lastTime;
+    lastTime = timestamp;
+    if (elapsed > MAX_FRAME_GAP) elapsed = FRAME_DURATION;
+    accumulatedTime += elapsed;
+    while (accumulatedTime >= FRAME_DURATION) {
+      update();
+      accumulatedTime -= FRAME_DURATION;
+    }
+    draw();
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+
+  window._gameState = function () {
+    return {
+      state: state,
+      playerX: player.x,
+      turkeyX: turkey.x,
+      playerSpeed: player.speed,
+      taps: taps,
+      winner: winner
+    };
+  };
+  window._tap = handleAction;
+})();
+</script>
+</body>
+</html>
