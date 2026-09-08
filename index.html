@@ -64,6 +64,7 @@
   var TAP_BOOST = 2.4;
   var FRICTION = 0.965;
   var TURKEY_SPEED = 1.62;
+  var MAX_RACER_GAP = 500;
   var FRAME_DURATION = 1000 / 60;
   var MAX_FRAME_GAP = 200;
 
@@ -253,6 +254,7 @@
 
       var turkeyPace = TURKEY_SPEED + Math.sin(frame * 0.035) * 0.1;
       turkey.x += turkeyPace;
+      turkey.x = Math.max(turkey.x, player.x - MAX_RACER_GAP);
       if (frame % 16 === 0) spawnDust(turkey.x, GROUND_Y + 35, "#e9d7a5", 1);
 
       var focusX = (player.x + turkey.x) / 2;
