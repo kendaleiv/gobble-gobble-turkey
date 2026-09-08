@@ -61,9 +61,10 @@
   var LEVEL_END = 3400;
   var START_X = 130;
   var PLAYER_MAX_SPEED = 6.5;
-  var TAP_BOOST = 2.4;
+  var TAP_BOOST = 1.65;
   var FRICTION = 0.965;
-  var TURKEY_SPEED = 1.62;
+  var TURKEY_SPEED = 2.15;
+  var TURKEY_ACCELERATION = 0.9;
   var MAX_RACER_GAP = 500;
   var FRAME_DURATION = 1000 / 60;
   var MAX_FRAME_GAP = 200;
@@ -252,7 +253,9 @@
       player.speed *= FRICTION;
       if (player.speed < 0.02) player.speed = 0;
 
-      var turkeyPace = TURKEY_SPEED + Math.sin(frame * 0.035) * 0.1;
+      var turkeyProgress = Math.min(1, (turkey.x - START_X) / (LEVEL_END - START_X));
+      var turkeyPace = TURKEY_SPEED + turkeyProgress * TURKEY_ACCELERATION +
+        Math.sin(frame * 0.035) * 0.1;
       turkey.x += turkeyPace;
       turkey.x = Math.max(turkey.x, player.x - MAX_RACER_GAP);
       if (frame % 16 === 0) spawnDust(turkey.x, GROUND_Y + 35, "#e9d7a5", 1);
