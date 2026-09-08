@@ -65,6 +65,7 @@
   var FRICTION = 0.965;
   var JUMP_HOLD_FRAMES = 18;
   var JUMP_SPEED = 10;
+  var JUMP_FORWARD_BOOST = 5;
   var JUMP_GRAVITY = 0.55;
   var HOLE_RECOVERY_FRAMES = 100;
   var HOLE_SPEED_FACTOR = 0.28;
@@ -197,6 +198,7 @@
   function startJump() {
     if (player.y !== 0 || player.holeRecovery > 0) return;
     player.vy = JUMP_SPEED;
+    player.speed = Math.min(PLAYER_MAX_SPEED, player.speed + JUMP_FORWARD_BOOST);
     spawnDust(player.x, GROUND_Y - 8, "#e9d7a5", 7);
   }
 
