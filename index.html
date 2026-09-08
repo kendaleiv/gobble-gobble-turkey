@@ -198,7 +198,7 @@
   function startJump() {
     if (player.y !== 0 || player.holeRecovery > 0) return;
     player.vy = JUMP_SPEED;
-    player.speed = Math.min(PLAYER_MAX_SPEED, player.speed + JUMP_FORWARD_BOOST);
+    player.speed += JUMP_FORWARD_BOOST;
     spawnDust(player.x, GROUND_Y - 8, "#e9d7a5", 7);
   }
 
