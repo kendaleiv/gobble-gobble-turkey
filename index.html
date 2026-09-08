@@ -48,9 +48,9 @@
 </head>
 <body>
 <canvas id="gameCanvas" width="960" height="540"
-  aria-label="Gobble Gobble Turkey racing game. Tap, click, or press Space repeatedly to move the pig."
+  aria-label="Gobble Gobble Turkey racing game. Tap, click, or press Space repeatedly to run. Press and hold to jump over holes."
   role="img"></canvas>
-<div id="instructions"><span>TAP</span>, <span>CLICK</span>, or press <span>SPACE</span> repeatedly to run!</div>
+<div id="instructions"><span>TAP</span> to run • <span>PRESS AND HOLD</span> to jump!</div>
 <script>
 (function () {
   "use strict";
@@ -63,6 +63,11 @@
   var PLAYER_MAX_SPEED = 6.5;
   var TAP_BOOST = 1.65;
   var FRICTION = 0.965;
+  var JUMP_HOLD_FRAMES = 18;
+  var JUMP_SPEED = 10;
+  var JUMP_GRAVITY = 0.55;
+  var HOLE_RECOVERY_FRAMES = 100;
+  var HOLE_SPEED_FACTOR = 0.28;
   var TURKEY_SPEED = 2.15;
   var TURKEY_ACCELERATION = 0.9;
   var MAX_RACER_GAP = 500;
@@ -82,6 +87,14 @@
   var taps = 0;
   var bestTaps = null;
   var particles = [];
+  var actionHeld = false;
+  var actionHoldFrames = 0;
+  var holdActionUsed = false;
+  var holes = [
+    { x: 920, width: 105 },
+    { x: 1770, width: 115 },
+    { x: 2630, width: 125 }
+  ];
   var clouds = [
     { x: 130, y: 90, scale: 1.1 },
     { x: 690, y: 130, scale: 0.8 },
@@ -91,7 +104,7 @@
     { x: 3060, y: 132, scale: 0.75 }
   ];
 
-  var player = { x: START_X, speed: 0 };
+  var player = { x: START_X, speed: 0, y: 0, vy: 0, holeRecovery: 0, hitHoles: [] };
   var turkey = { x: START_X + 20 };
   var fullscreenButton = { x: WIDTH - 58, y: 16, w: 42, h: 42 };
 
@@ -133,6 +146,13 @@
   function resetRace() {
     player.x = START_X;
     player.speed = 0;
+    player.y = 0;
+    player.vy = 0;
+    player.holeRecovery = 0;
+    player.hitHoles.length = 0;
+    actionHeld = false;
+    actionHoldFrames = 0;
+    holdActionUsed = false;
     turkey.x = START_X + 20;
     cameraX = 0;
     countdown = 180;
@@ -156,6 +176,30 @@
     }
   }
 
+  function beginAction() {
+    if (state !== "racing") {
+      handleAction();
+      return;
+    }
+    if (actionHeld) return;
+    actionHeld = true;
+    actionHoldFrames = 0;
+    holdActionUsed = false;
+    handleAction();
+  }
+
+  function endAction() {
+    actionHeld = false;
+    actionHoldFrames = 0;
+    holdActionUsed = false;
+  }
+
+  function startJump() {
+    if (player.y !== 0 || player.holeRecovery > 0) return;
+    player.vy = JUMP_SPEED;
+    spawnDust(player.x, GROUND_Y - 8, "#e9d7a5", 7);
+  }
+
   canvas.addEventListener("pointerdown", function (event) {
     event.preventDefault();
     var point = canvasPoint(event);
@@ -163,15 +207,20 @@
       toggleFullscreen();
       return;
     }
-    handleAction();
+    beginAction();
   });
+  document.addEventListener("pointerup", endAction);
+  document.addEventListener("pointercancel", endAction);
 
   document.addEventListener("keydown", function (event) {
     if (event.code === "Space" || event.code === "Enter") {
       event.preventDefault();
-      if (!event.repeat) handleAction();
+      if (!event.repeat) beginAction();
     }
     if (event.code === "KeyF") toggleFullscreen();
+  });
+  document.addEventListener("keyup", function (event) {
+    if (event.code === "Space" || event.code === "Enter") endAction();
   });
 
   window.addEventListener("resize", resizeCanvas);
@@ -249,9 +298,40 @@
     }
 
     if (state === "racing") {
-      player.x += player.speed;
+      if (actionHeld && !holdActionUsed) {
+        actionHoldFrames++;
+        if (actionHoldFrames >= JUMP_HOLD_FRAMES) {
+          startJump();
+          holdActionUsed = true;
+        }
+      }
+
+      if (player.y > 0 || player.vy > 0) {
+        player.y += player.vy;
+        player.vy -= JUMP_GRAVITY;
+        if (player.y <= 0) {
+          player.y = 0;
+          player.vy = 0;
+        }
+      }
+
+      var speedFactor = player.holeRecovery > 0 ? HOLE_SPEED_FACTOR : 1;
+      player.x += player.speed * speedFactor;
       player.speed *= FRICTION;
       if (player.speed < 0.02) player.speed = 0;
+
+      for (var holeIndex = 0; holeIndex < holes.length; holeIndex++) {
+        var hole = holes[holeIndex];
+        if (player.hitHoles.indexOf(holeIndex) === -1 &&
+            player.x >= hole.x && player.x <= hole.x + hole.width &&
+            player.y < 12) {
+          player.hitHoles.push(holeIndex);
+          player.holeRecovery = HOLE_RECOVERY_FRAMES;
+          player.speed = Math.min(player.speed, 2.1);
+          spawnDust(player.x, GROUND_Y + 5, "#6e4b28", 10);
+        }
+      }
+      if (player.holeRecovery > 0) player.holeRecovery--;
 
       var turkeyProgress = Math.min(1, (turkey.x - START_X) / (LEVEL_END - START_X));
       var turkeyPace = TURKEY_SPEED + turkeyProgress * TURKEY_ACCELERATION +
@@ -358,9 +438,28 @@
     ctx.stroke();
   }
 
+  function drawHoles() {
+    for (var i = 0; i < holes.length; i++) {
+      var hole = holes[i];
+      var x = hole.x - cameraX;
+      if (x > WIDTH + hole.width || x + hole.width < 0) continue;
+      ctx.fillStyle = "#51361f";
+      ctx.beginPath();
+      ctx.ellipse(x + hole.width / 2, GROUND_Y + 10, hole.width / 2, 20, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "#241b16";
+      ctx.beginPath();
+      ctx.ellipse(x + hole.width / 2, GROUND_Y + 12, hole.width * 0.37, 12, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
   function drawPig(worldX) {
     var x = worldX - cameraX;
-    var y = GROUND_Y - 45;
+    var fallDepth = player.holeRecovery > 0
+      ? 28 * Math.sin(Math.PI * player.holeRecovery / HOLE_RECOVERY_FRAMES)
+      : 0;
+    var y = GROUND_Y - 45 - player.y + fallDepth;
     var stride = state === "racing" ? Math.sin(frame * (0.15 + player.speed * 0.12)) * 5 : 0;
 
     ctx.strokeStyle = "#d66782";
@@ -588,7 +687,7 @@
     roundedRect(260, 363, 440, 65, 16, "#4f9f45");
     ctx.fillStyle = "#fff";
     ctx.font = "bold 25px 'Trebuchet MS', sans-serif";
-    ctx.fillText("TAP OR PRESS SPACE TO RACE", WIDTH / 2, 404);
+    ctx.fillText("TAP TO RUN • HOLD TO JUMP", WIDTH / 2, 404);
     ctx.fillStyle = "#60452e";
     ctx.font = "bold 16px 'Trebuchet MS', sans-serif";
     ctx.fillText("Help the pig beat the turkey stack to the golden key!", WIDTH / 2, 445);
@@ -642,6 +741,7 @@
   function draw() {
     drawBackground();
     drawFence();
+    drawHoles();
     drawKey();
     drawTurkeyTeam(turkey.x);
     drawPig(player.x);
@@ -677,6 +777,8 @@
       playerX: player.x,
       turkeyX: turkey.x,
       playerSpeed: player.speed,
+      playerY: player.y,
+      holeRecovery: player.holeRecovery,
       taps: taps,
       winner: winner
     };

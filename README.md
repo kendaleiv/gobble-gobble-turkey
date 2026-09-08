@@ -6,10 +6,11 @@ A browser-based tapping race! Help a speedy pig beat a stack of turkeys to the g
 
 ## How to Play
 
-1. Tap or click the game, or press **SPACE**
-2. Keep tapping to keep the pig moving
-3. Reach the golden key before the turkeys
-4. Use the fullscreen button in the top-right for a mobile-friendly view
+1. Tap or click the game, or press **SPACE**, to run
+2. Press and hold the game or **SPACE** to jump over holes
+3. If the pig falls into a hole, keep tapping to climb out
+4. Reach the golden key before the turkeys
+5. Use the fullscreen button in the top-right for a mobile-friendly view
 
 The game has one level and works on desktop and mobile.
 
