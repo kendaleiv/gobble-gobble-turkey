@@ -2,7 +2,7 @@
 
 A browser-based tapping race! Help a speedy pig beat a stack of turkeys to the golden key.
 
-**[▶️ Play Now](https://kendaleiv.github.io/gobble-gobble-turney/)** — no download required!
+**[▶️ Play Now](https://kendaleiv.github.io/gobble-gobble-turkey/)** — no download required!
 
 ## How to Play
 
